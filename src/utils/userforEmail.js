@@ -2,13 +2,13 @@ import nodemailer from "nodemailer";
 import { ApiError } from "./ApiError.js";
 
 const createTransporter = () => {
-  const { EMAIL_HOST, EMAIL_PORT, EMAIL_SECURE, EMAIL_USER, EMAIL_PASS } = process.env;
+  const { EMAIL_HOST, EMAIL_PORT, EMAIL_SECURE, EMAIL_USER, EMAIL_PASSWORD } = process.env;
   
   return nodemailer.createTransport({
     host: EMAIL_HOST,
     port: parseInt(EMAIL_PORT, 10),
     secure: EMAIL_SECURE === "true",
-    auth: { user: EMAIL_USER, pass: EMAIL_PASS },
+    auth: { user: EMAIL_USER, pass: EMAIL_PASSWORD },
   });
 };
 
@@ -40,28 +40,8 @@ const sendEmail = async ({ to, subject, html, from, attachments = [] }) => {
   }
 };
 
-export const sendWelcomeEmail = async (email, password) => {
-  const html = `
-    <!DOCTYPE html>
-    <html>
-    <body>
-        <h1>Welcome to Our Service, ${userName}!</h1>
-        <p>Here is your password: ${password}</p>
-        <p>We're excited to have you on board.</p>
-        <p>If you have any questions, please don't hesitate to contact us.</p>
-    </body>
-    </html>
-  `;
-
-  return sendEmail({
-    to: email,
-    subject: 'Welcome to Our Service',
-    html,
-  });
-};
-
 export const sendPasswordResetEmail = async (email, resetToken) => {
-  const resetLink = `${process.env.FRONTEND_URL}/auth/reset-password-verify/${resetToken}`; 
+  const resetLink = `${process.env.FRONTEND_URL}/verify-token/${resetToken}`; 
   const html = `
     <!DOCTYPE html>
     <html>
@@ -84,7 +64,6 @@ export const sendPasswordResetEmail = async (email, resetToken) => {
 };
 
 export default {
-  sendWelcomeEmail,
   sendPasswordResetEmail,
 };
 

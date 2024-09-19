@@ -48,28 +48,40 @@ const customerSchema = new mongoose.Schema(
       type: String,
       enum: [
         "Bungalow",
-        "2 bed House",
-        "3 bed House",
-        "4 bed House",
-        "5 bed House",
+        "1 Bedroom",
+        "2 Bedroom",
+        "3 Bedroom",
+        "4 Bedroom",
+        "Town House/3 Stories",
+      ],
+    },
+    selectHomeStyle: {
+      type: String,
+      enum: [
+        "Terrace",
+        "Semi-Detached",
+        "Detached",
+        "Bungalow",
         "Town House/3 Stories",
       ],
       required: true,
     },
-    selectHomeStyle: {
-      type: String,
-      enum: ["Terrace", "Semi-Detached", "Detached"],
-      required: true,
-    },
     numberOfBedrooms: {
       type: String,
-      enum: ["1", "2", "3", "4", "5", "6"],
+      enum: ["2 Bedroom", "3 Bedroom", "4 Bedroom", "5 Bedroom","Ground"],
     },
     numberOfStories: {
       type: String,
       enum: ["1", "2", "3", "4"],
     },
     message: { type: String },
+    photos: {
+      type: [String],
+    },
+    termsConditions: { 
+      type: Boolean, 
+      default: false 
+    },
     paymentMethod: {
       type: String,
       enum: ["PayPal"],
@@ -80,7 +92,39 @@ const customerSchema = new mongoose.Schema(
       enum: ["pending", "completed", "failed", "cancelled"],
       default: "pending",
     },
-    paypalOrderId: { type: String },
+    paypalOrderId: {
+      type: String,
+      // required: true,  // Set to true if you always need to track PayPal transactions
+      unique: true     // Ensures that each PayPal order ID is unique
+    },
+    captureId: {
+      type: String,
+      required: false,  // Set to true if capture ID is mandatory for all transactions
+      unique: false     // Optional: Ensure uniqueness if needed
+    },
+    refundId: {
+      type: String,
+      required: false,  // Optional: Set to true if refund ID is mandatory
+      unique: false     // Optional: Ensures uniqueness if needed
+    },
+    refundStatus: {
+      type: String,
+      enum: ["pending", "completed", "failed", "reversed"],
+      default: "pending",
+    },
+    refundAmount: {
+      type: Number,
+      required: false,  // Optional: Set to true if you always need to track the refund amount
+      min: 0            // Ensure refund amount is non-negative
+    },
+    refundReason: {
+      type: String,
+      required: false,  // Optional: You can include this if you want to store reasons for refunds
+    },
+    refundDate: {
+      type: Date,
+      required: false,  // Optional: Track the date when the refund was processed
+    },
     isLocked: { type: Boolean, default: false },
     lockExpiresAt: { type: Date },
     isBooked: { type: Boolean, default: false },

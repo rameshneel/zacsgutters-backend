@@ -11,11 +11,7 @@ function environment() {
 
   return new checkoutNodeJssdk.core.SandboxEnvironment(clientId, clientSecret);
 }
-
 export async function createOrder(amount, bookingDetails) {
-  console.log("log", amount);
-  console.log("log1", bookingDetails);
-
   const request = new checkoutNodeJssdk.orders.OrdersCreateRequest();
   request.prefer("return=representation");
   request.requestBody({
@@ -38,9 +34,10 @@ export async function createOrder(amount, bookingDetails) {
   });
 
   const order = await client().execute(request);
+  console.log("order for ********************", order);
+
   return order.result;
 }
-
 export async function capturePayment(orderId) {
   const request = new checkoutNodeJssdk.orders.OrdersCaptureRequest(orderId);
   request.requestBody({});
@@ -48,7 +45,6 @@ export async function capturePayment(orderId) {
   console.log("responce nn", response);
   return response.result;
 }
-
 export async function checkOrderStatus(orderId) {
   const request = new checkoutNodeJssdk.orders.OrdersGetRequest(orderId);
   const response = await client().execute(request);
@@ -70,42 +66,9 @@ export async function refundPayment(captureId, amount) {
 
   try {
     const response = await client().execute(request);
-    console.log("Refund response:", response);
     return response.result;
   } catch (error) {
     console.error("Refund error:", error);
     throw error;
   }
 }
-
-// import Booking from '../models/Booking.js';
-
-// const LOCK_DURATION = 10 * 60 * 1000; // 10 minutes in milliseconds
-
-// export async function lockSlot(date, timeSlot) {
-//   const booking = await Booking.findOneAndUpdate(
-//     {
-//       date,
-//       timeSlot,
-//       isLocked: false,
-//       $or: [
-//         { lockExpiresAt: { $lt: new Date() } },
-//         { lockExpiresAt: { $exists: false } }
-//       ]
-//     },
-//     {
-//       isLocked: true,
-//       lockExpiresAt: new Date(Date.now() + LOCK_DURATION)
-//     },
-//     { new: true }
-//   );
-
-//   return booking;
-// }
-
-// export async function unlockSlot(bookingId) {
-//   await Booking.findByIdAndUpdate(bookingId, {
-//     isLocked: false,
-//     lockExpiresAt: null
-//   });
-// }

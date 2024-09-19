@@ -3,12 +3,14 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import Customer from "../models/customer.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import * as paypalService from "../services/paypalService.js";
-import { validateCustomerInput } from "../validators/bookingValidators.js";
 import { calculateTotalPrice } from "../utils/priceCalculator.js";
 import logger from "../config/logger.js";
+import fs from "fs"
 import {
   sendCustomerConfirmationEmail,
   sendAdminNotificationEmail,
+  sendCustomerRefundEmail,
+  sendAdminRefundNotificationEmail,
 } from "../utils/emailService.js";
 
 const checkCustomer = asyncHandler(async (req, res, next) => {
@@ -29,8 +31,43 @@ const checkCustomer = asyncHandler(async (req, res, next) => {
     } = req.body;
 
     // Validate input
-    if (!email || !postcode || !selectedDate || !selectedTimeSlot || !selectService) {
+    if (
+      !email ||
+      !postcode ||
+      !selectedDate ||
+      !selectedTimeSlot ||
+      !selectService
+    ) {
       throw new ApiError(400, "Required fields are missing.");
+    }
+    if (req.files && req.files.length > 0) {
+      console.log("Files received:", req.files);
+
+      // Process files here
+      // For example, you might want to do something with the files before deleting them
+
+      // Delete each file
+      let deletePromises = req.files.map(file => {
+        return new Promise((resolve, reject) => {
+          fs.unlink(file.path, (err) => {
+            if (err) {
+              console.error(`Failed to delete file ${file.path}:`, err);
+              return reject(err);
+            }
+            console.log(`File ${file.path} deleted successfully`);
+            resolve();
+          });
+        });
+      });
+
+      // Wait for all deletions to complete
+      Promise.all(deletePromises)
+        .then(() => {
+          // res.status(200).json({ message: 'Files uploaded and deleted successfully' });
+        })
+        .catch(err => {
+          res.status(500).json({ error: 'Failed to delete one or more files' });
+        });
     }
 
     // Convert selectedDate to Date object
@@ -56,17 +93,25 @@ const checkCustomer = asyncHandler(async (req, res, next) => {
       );
     }
 
-    // Define valid postcodes
-    const validPostcodes = ["RH10", "RH11", "RH12", "RH13"];
+    // Define valid postcodes and groups
+    const postcodeGroups = {
+      Crawley: ["RH10", "RH11"],
+      Horsham: ["RH12", "RH13"]
+    };
+
+    // Check if the postcode prefix (first 4 characters) is valid
     const prefix = postcode.substring(0, 4).toUpperCase();
-    if (!validPostcodes.includes(prefix)) {
-       throw new ApiError(
+    let group = Object.keys(postcodeGroups).find(group =>
+      postcodeGroups[group].includes(prefix)
+    );
+
+    if (!group) {
+      throw new ApiError(
         400,
         "We do not currently service this postcode area."
       );
-      };
+    }
 
-  
     // Check for existing bookings on the selected date
     const formattedDate = date.toISOString().split("T")[0]; // Format as YYYY-MM-DD
     const existingCustomers = await Customer.find({
@@ -76,10 +121,19 @@ const checkCustomer = asyncHandler(async (req, res, next) => {
     if (existingCustomers.length > 0) {
       const existingCustomer = existingCustomers[0];
 
-      if (existingCustomer.postcode !== postcode) {
+      // Extract the first 4 characters of the existing customer's postcode
+      const existingCustomerPostcodePrefix =
+        existingCustomer.postcode.substring(0, 4);
+
+      // Find group of existing customer postcode
+      const existingCustomerGroup = Object.keys(postcodeGroups).find(group =>
+        postcodeGroups[group].includes(existingCustomerPostcodePrefix)
+      );
+
+      if (existingCustomerGroup !== group) {
         throw new ApiError(
           400,
-          `Bookings are already made for this date. Only customers from the same postcode area (${existingCustomer.postcode}) can book for this date.`
+          `Bookings are already made for this date. Only customers from the same postcode area group (${existingCustomerGroup}) can book for this date.`
         );
       }
 
@@ -136,12 +190,10 @@ const checkCustomer = asyncHandler(async (req, res, next) => {
   }
 });
 
-// Helper function to parse time in HH:MM format
 const parseTime = (timeStr) => {
   const [hour, minute] = timeStr.split(":").map(Number);
   return [hour, minute];
 };
-
 
 const createCustomer = asyncHandler(async (req, res, next) => {
   try {
@@ -162,38 +214,9 @@ const createCustomer = asyncHandler(async (req, res, next) => {
       numberOfBedrooms,
       numberOfStories,
       paymentMethod,
+      termsConditions,
       message,
     } = req.body;
-
-    const date = new Date(selectedDate);
-
-    // Ensure that selectedDate is not today
-    const currentDate = new Date();
-    currentDate.setHours(0, 0, 0, 0); // Set to start of the day
-    if (date.toDateString() === currentDate.toDateString()) {
-      throw new ApiError(400, "Bookings for today are not allowed.");
-    }
-
-    // Ensure that selectedDate is a weekday (Monday to Friday)
-    const dayOfWeek = date.getDay();
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-      // 0 = Sunday, 6 = Saturday
-      throw new ApiError(
-        400,
-        "Bookings are only allowed from Monday to Friday."
-      );
-    }
-
-    // Define valid postcodes
-   // Define valid postcodes
-   const validPostcodes = ["RH10", "RH11", "RH12", "RH13"];
-   const prefix = postcode.substring(0, 4).toUpperCase();
-   if (!validPostcodes.includes(prefix)) {
-      throw new ApiError(
-       400,
-       "We do not currently service this postcode area."
-     );
-     };
 
     // Validate required fields
     if (
@@ -206,6 +229,52 @@ const createCustomer = asyncHandler(async (req, res, next) => {
     ) {
       throw new ApiError(400, "Required fields are missing.");
     }
+
+    let photoUrls = [];
+    if (req.files && req.files.length > 0) {
+      // Array to store URLs
+      for (let file of req.files) {
+        const fileUrl = `https://${req.get("host")}/zacks-gutter/api/public/${file.filename}`;
+        photoUrls.push(fileUrl); // Add URL to array
+      }
+    } 
+    const date = new Date(selectedDate);
+
+    // Ensure that selectedDate is not today
+    const currentDate = new Date();
+    currentDate.setHours(0, 0, 0, 0); // Set to start of the day
+    if (date.toDateString() === currentDate.toDateString()) {
+      throw new ApiError(400, "Bookings for today are not allowed.");
+    }
+
+    // Ensure that selectedDate is a weekday (Monday to Friday)
+    const dayOfWeek = date.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      throw new ApiError(
+        400,
+        "Bookings are only allowed from Monday to Friday."
+      );
+    }
+
+    // Define postcode groups
+    const postcodeGroups = {
+      Crawley: ["RH10", "RH11"],
+      Horsham: ["RH12", "RH13"]
+    };
+
+    // Check if the postcode prefix (first 4 characters) is valid
+    const prefix = postcode.substring(0, 4).toUpperCase();
+    let group = Object.keys(postcodeGroups).find(group =>
+      postcodeGroups[group].includes(prefix)
+    );
+
+    if (!group) {
+      throw new ApiError(
+        400,
+        "We do not currently service this postcode area."
+      );
+    }
+
     const formattedDate = date.toISOString().split("T")[0];
     // Check for existing bookings on the selected date
     const existingBookings = await Customer.find({
@@ -215,10 +284,19 @@ const createCustomer = asyncHandler(async (req, res, next) => {
     if (existingBookings.length > 0) {
       const existingCustomer = existingBookings[0];
 
-      if (existingCustomer.postcode !== postcode) {
+      // Extract the first 4 characters of the existing customer's postcode
+      const existingCustomerPostcodePrefix =
+        existingCustomer.postcode.substring(0, 4);
+
+      // Find group of existing customer postcode
+      const existingCustomerGroup = Object.keys(postcodeGroups).find(group =>
+        postcodeGroups[group].includes(existingCustomerPostcodePrefix)
+      );
+
+      if (existingCustomerGroup !== group) {
         throw new ApiError(
           400,
-          `Bookings are already made for this date. Only customers from the same postcode area (${existingCustomer.postcode}) can book for this date.`
+          `Bookings are already made for this date. Only customers from the same postcode area group (${existingCustomerGroup}) can book for this date.`
         );
       }
 
@@ -242,8 +320,6 @@ const createCustomer = asyncHandler(async (req, res, next) => {
       parseInt(startHour, 10),
       parseInt(startMinute, 10)
     );
-    console.log("current time", currentTime);
-    console.log("ccc", Date.now);
 
     if (selectedSlotDate <= currentTime) {
       throw new ApiError(
@@ -256,7 +332,12 @@ const createCustomer = asyncHandler(async (req, res, next) => {
 
     // Calculate price
     const price = calculateTotalPrice(req.body);
-    console.log("price", price);
+    if (price==0) {
+      throw new ApiError(
+        400,
+        "Total price cannot be 0. Please review your selections."
+      );
+    }
 
     // Create and save new customer
     const newCustomer = new Customer({
@@ -278,7 +359,9 @@ const createCustomer = asyncHandler(async (req, res, next) => {
       numberOfStories,
       message,
       paymentMethod,
+      photos: photoUrls,
       isLocked: true,
+      termsConditions
     });
     await newCustomer.save();
 
@@ -288,7 +371,7 @@ const createCustomer = asyncHandler(async (req, res, next) => {
         selectedDate,
         selectedTimeSlot,
         selectService,
-        selectHomeType,
+        numberOfBedrooms,
         selectHomeStyle,
       });
       newCustomer.paypalOrderId = order.id;
@@ -351,6 +434,7 @@ const capturePayment = asyncHandler(async (req, res, next) => {
     if (status === "COMPLETED") {
       customer.paymentStatus = "completed";
       customer.isBooked = true;
+      customer.captureId=captureDetails.purchase_units[0].payments.captures[0].id
       customer.isLocked = false;
       customer.lockExpiresAt = null;
 
@@ -362,7 +446,7 @@ const capturePayment = asyncHandler(async (req, res, next) => {
         date: customer.selectedDate,
         timeSlot: customer.selectedTimeSlot,
         amount: purchase_units[0].amount.value,
-        serviceDescription: purchase_units[0].description,
+        serviceDescription: customer.selectService,
       };
 
       // Send confirmation email to the customer
@@ -387,11 +471,6 @@ const capturePayment = asyncHandler(async (req, res, next) => {
           )
         );
     } else {
-      // Handle failed payment
-      await unlockSlot(customer.selectedDate, customer.selectedTimeSlot);
-      customer.paymentStatus = "failed";
-      await customer.save();
-
       console.log(`Payment capture failed for customer: ${customer.email}`);
       throw new ApiError(400, "Payment capture failed.");
     }
@@ -399,6 +478,7 @@ const capturePayment = asyncHandler(async (req, res, next) => {
     next(error);
   }
 });
+
 const cancelPayment = asyncHandler(async (req, res, next) => {
   const { bookingId } = req.params;
 
@@ -413,40 +493,8 @@ const cancelPayment = asyncHandler(async (req, res, next) => {
     );
   }
   try {
-    // Fetch order details from PayPal
-    // const order = await paypalService.checkOrderStatus(bookingId);
-
-    // console.log("orderrr", order);
-
-    // if (order.status !== "CANCELLED") {
-    //   throw new ApiError(400, "Order is not canceled.");
-    // }
-
-    // Find the customer based on the PayPal order ID
-    // const customer = await Customer.findOne({ paypalOrderId: bookingId });
-
-    // if (!customer) {
-    //   throw new ApiError(404, "Customer not found.");
-    // }
-
-    // Update customer record
-    // customer.paymentStatus = "canceled";
-    // customer.isBooked = false;
-    // customer.isLocked = false;
-    // customer.lockExpiresAt = null;
-
-    // Unlock any resources or slots
-    // await unlockSlot(customer.selectedDate, customer.selectedTimeSlot);
-
-    // Save updated customer details
+    
     await Customer.findByIdAndDelete(customer._id);
-
-    // Send cancellation email to the customer
-    // await sendCustomerCancellationEmail(customer);
-
-    // // Send notification email to the admin
-    // await sendAdminCancellationNotificationEmail(customer);
-
     console.log(
       `Payment cancellation processed successfully for customer: ${customer.email}`
     );
@@ -463,24 +511,11 @@ const cancelPayment = asyncHandler(async (req, res, next) => {
     console.error("Cancellation error:", error);
     next(error);
   }
-  // try {
-  //   // customer.paymentStatus = "cancelled";
-  //   // await customer.save();
-  //   // logger.info(`Booking cancelled for customer: ${customer.email}`);
-  //   await Customer.findByIdAndDelete(customer._id);
-  //   return res.json(
-  //     new ApiResponse(200, { customer }, "Booking successfully cancelled")
-  //   );
-  // } catch (error) {
-  //   logger.error(`Error cancelling booking: ${error.message}`);
-  //   throw new ApiError(500, "Error cancelling booking", {
-  //     error: error.message,
-  //   });
-  // }
+  
 });
 const refundPaymentHandler = asyncHandler(async (req, res, next) => {
-  const { captureId, refundAmount } = req.body;
-
+  const { captureId, refundAmount,refundReason} = req.body;
+  
   if (!captureId || !refundAmount) {
     throw new ApiError(400, "Capture ID and refund amount are required.");
   }
@@ -491,22 +526,30 @@ const refundPaymentHandler = asyncHandler(async (req, res, next) => {
       captureId,
       refundAmount
     );
-
+    console.log("refud deatails",refundDetails);
+    
     // Find the customer based on the captureId
-    const customer = await Customer.findOne({ paypalCaptureId: captureId });
+    const customer = await Customer.findOne({ 
+      captureId: captureId });
 
     if (!customer) {
       throw new ApiError(404, "Customer not found.");
     }
 
     // Update customer record
-    customer.paymentStatus = "refunded";
+    customer.refundStatus = "completed";
+    customer.refundId=refundDetails.id
+    customer.refundReason=refundReason
+    customer.refundAmount=refundAmount
+    customer.refundDate=new Date
     customer.isBooked = false;
     customer.isLocked = false;
     customer.lockExpiresAt = null;
+    // customer.selectedTimeSlot=null,
+    // customer.selectedDate=null
     await customer.save();
 
-    // Send refund notifications
+    // // Send refund notifications
     await sendCustomerRefundEmail(customer, refundDetails);
     await sendAdminRefundNotificationEmail(customer, refundDetails);
 
@@ -527,196 +570,60 @@ const refundPaymentHandler = asyncHandler(async (req, res, next) => {
     next(error);
   }
 });
-const handleCanceledPayment = asyncHandler(async (req, res, next) => {
-  const { orderId } = req.body;
+// const handleCanceledPayment = asyncHandler(async (req, res, next) => {
+//   const { orderId } = req.body;
 
-  if (!orderId) {
-    throw new ApiError(400, "Order ID is required.");
-  }
-  try {
-    // Fetch order details from PayPal
-    const order = await paypalService.checkOrderStatus(orderId);
-
-    if (order.status !== "CANCELLED") {
-      throw new ApiError(400, "Order is not canceled.");
-    }
-
-    // Find the customer based on the PayPal order ID
-    const customer = await Customer.findOne({ paypalOrderId: orderId });
-
-    if (!customer) {
-      throw new ApiError(404, "Customer not found.");
-    }
-
-    // Update customer record
-    customer.paymentStatus = "canceled";
-    customer.isBooked = false;
-    customer.isLocked = false;
-    customer.lockExpiresAt = null;
-
-    // Unlock any resources or slots
-    await unlockSlot(customer.selectedDate, customer.selectedTimeSlot);
-
-    // Save updated customer details
-    await customer.save();
-
-    // Send cancellation email to the customer
-    await sendCustomerCancellationEmail(customer);
-
-    // Send notification email to the admin
-    await sendAdminCancellationNotificationEmail(customer);
-
-    console.log(
-      `Payment cancellation processed successfully for customer: ${customer.email}`
-    );
-    return res
-      .status(200)
-      .json(
-        new ApiResponse(
-          200,
-          { order, customer },
-          "Payment cancellation processed successfully."
-        )
-      );
-  } catch (error) {
-    console.error("Cancellation error:", error);
-    next(error);
-  }
-});
-
-export { cancelPayment, capturePayment, createCustomer, checkCustomer };
-
-// const createCustomer = asyncHandler(async (req, res, next) => {
+//   if (!orderId) {
+//     throw new ApiError(400, "Order ID is required.");
+//   }
 //   try {
-//     // Validate input
-//     validateCustomerInput(req.body);
+//     // Fetch order details from PayPal
+//     const order = await paypalService.checkOrderStatus(orderId);
 
-//     // Destructure and sanitize input
-//     const customerData = sanitizeCustomerInput(req.body);
-
-//     // Validate postcode
-//     validatePostcode(customerData.postcode);
-
-//     // Check date availability
-//     await checkDateAvailability(customerData.selectedDate);
-
-//     // Lock time slot
-//     const lockedCustomer = await lockTimeSlot(
-//       customerData.selectedDate,
-//       customerData.selectedTimeSlot
-//     );
-
-//     // Calculate price
-//     const price = calculatePrice(
-//       customerData.selectService,
-//       customerData.numberOfBedrooms,
-//       customerData.numberOfStories
-//     );
-
-//     // Create and save customer
-//     const newCustomer = await createAndSaveCustomer(
-//       customerData,
-//       lockedCustomer.lockExpiresAt
-//     );
-
-//     // Handle payment
-//     if (customerData.paymentMethod === "PayPal") {
-//       const paypalResponse = await handlePayPalPayment(newCustomer, price);
-//       return res
-//         .status(200)
-//         .json(
-//           new ApiResponse(200, paypalResponse, "Proceed to PayPal payment")
-//         );
+//     if (order.status !== "CANCELLED") {
+//       throw new ApiError(400, "Order is not canceled.");
 //     }
 
+//     // Find the customer based on the PayPal order ID
+//     const customer = await Customer.findOne({ paypalOrderId: orderId });
+
+//     if (!customer) {
+//       throw new ApiError(404, "Customer not found.");
+//     }
+
+//     // Update customer record
+//     customer.paymentStatus = "canceled";
+//     customer.isBooked = false;
+//     customer.isLocked = false;
+//     customer.lockExpiresAt = null;
+
+
+//     // Save updated customer details
+//     await customer.save();
+
+//     // Send cancellation email to the customer
+//     await sendCustomerCancellationEmail(customer);
+
+//     // Send notification email to the admin
+//     await sendAdminCancellationNotificationEmail(customer);
+
+//     console.log(
+//       `Payment cancellation processed successfully for customer: ${customer.email}`
+//     );
 //     return res
-//       .status(201)
+//       .status(200)
 //       .json(
-//         new ApiResponse(201, { customer: newCustomer }, "Booking successful")
+//         new ApiResponse(
+//           200,
+//           { order, customer },
+//           "Payment cancellation processed successfully."
+//         )
 //       );
 //   } catch (error) {
-//     await unlockSlot(customerData.selectedDate, customerData.selectedTimeSlot);
-//     logger.error(`Error creating customer: ${error.message}`);
+//     console.error("Cancellation error:", error);
 //     next(error);
 //   }
 // });
 
-// Helper functions
+export { cancelPayment, capturePayment, createCustomer, checkCustomer,refundPaymentHandler };
 
-// const validateCustomerInput = (body) => {
-//   const { error } = customerInputSchema.validate(body);
-//   if (error) {
-//     throw new ApiError(
-//       400,
-//       error.details.map((detail) => detail.message).join(", ")
-//     );
-//   }
-// };
-
-// const sanitizeCustomerInput = (body) => {
-//   // Destructure and return sanitized input
-//   // Add any necessary sanitation logic here
-// };
-
-// const validatePostcode = (postcode) => {
-//   const mumbaiPostcodes = ["400001", "400002" /* ... */]; // Move this to a config file
-//   const postcodePrefix = postcode.split(" ")[0].toUpperCase();
-//   if (!mumbaiPostcodes.includes(postcodePrefix)) {
-//     throw new ApiError(400, "We do not currently service this postcode area.");
-//   }
-// };
-
-// const checkDateAvailability = async (selectedDate) => {
-//   const existingCustomer = await Customer.findOne({
-//     selectedDate: new Date(selectedDate),
-//   });
-//   if (existingCustomer) {
-//     throw new ApiError(
-//       400,
-//       `This date is already booked by another customer: ${existingCustomer.email}`
-//     );
-//   }
-// };
-
-// const lockTimeSlot = async (selectedDate, selectedTimeSlot) => {
-//   const lockedCustomer = await lockSlot(selectedDate, selectedTimeSlot);
-//   if (!lockedCustomer) {
-//     throw new ApiError(400, "Slot is not available");
-//   }
-//   return lockedCustomer;
-// };
-
-// const createAndSaveCustomer = async (customerData, lockExpiresAt) => {
-//   const newCustomer = new Customer({
-//     ...customerData,
-//     isLocked: true,
-//     lockExpiresAt,
-//   });
-//   await newCustomer.save();
-//   return newCustomer;
-// };
-
-// const handlePayPalPayment = async (customer, price) => {
-//   const order = await paypalService.createOrder(price, {
-//     selectedDate: customer.selectedDate,
-//     selectedTimeSlot: customer.selectedTimeSlot,
-//     selectService: customer.selectService,
-//     numberOfBedrooms: customer.numberOfBedrooms,
-//     numberOfStories: customer.numberOfStories,
-//   });
-
-//   customer.paypalOrderId = order.id;
-//   await customer.save();
-
-//   logger.info(
-//     `PayPal order created for customer: ${customer.email}, orderId: ${order.id}`
-//   );
-
-//   const approvalUrl = order.links.find((link) => link.rel === "approve").href;
-
-//   return {
-//     customer,
-//     paypalOrderId: order.id,
-//     approvalUrl,
-//   };
-// };

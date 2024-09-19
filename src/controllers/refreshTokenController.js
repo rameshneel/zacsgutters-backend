@@ -8,14 +8,15 @@ import { ApiResponse } from '../utils/ApiResponse.js';
 export const refreshToken =asyncHandler (async (req, res) => {
   try {
     const refreshToken = req.cookies.refreshToken;
-
+    console.log("refresh toknn",refreshToken);
+    
     if (!refreshToken) {
       return res.status(401).json({ message: 'Refresh token not found' });
     }
-
     // Verify the refresh token
     const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
-
+    console.log("decodedhg",decoded);
+    
     // Find the user by id
     const user = await User.findById(decoded.id);
 
@@ -34,7 +35,7 @@ export const refreshToken =asyncHandler (async (req, res) => {
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: true, // Use secure in production
-      sameSite: 'strict',
+      sameSite: 'None',
       maxAge: 15 * 60 * 1000 // 15 minutes in milliseconds
     });
 

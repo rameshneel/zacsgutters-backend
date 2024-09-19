@@ -5,7 +5,6 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
 import {
   sendPasswordResetEmail,
-  sendWelcomeEmail,
 } from "../utils/userforEmail.js";
 
 const generateAccessAndRefereshTokens = async (userId) => {
@@ -64,14 +63,13 @@ const loginUser = asyncHandler(async (req, res, next) => {
       httpOnly: true,
       secure: true,
       sameSite: 'None',
-      path: '/', // कुकी पूरे साइट पर उपलब्ध होगी
+      path: '/', 
     };
     
-  console.log("fdhff rMW");
     return res
     .status(200)
     .cookie("accessToken", accessToken, options)
-    .cookie("refreshToken", refreshToken, { ...options, maxAge: 7 * 24 * 60 * 60 * 1000 }) // 7 days
+    .cookie("refreshToken", refreshToken, { ...options, maxAge: 7 * 24 * 60 * 60 * 1000 })
     .json(new ApiResponse(200, { user: loggedInUser, accessToken, refreshToken }, "User logged in successfully"));
   } catch (error) {
     return next(error);
@@ -129,12 +127,6 @@ const registerUser = asyncHandler(async (req, res, next) => {
         "Something went wrong while registering the user"
       );
     }
-
-    // const sentemail = await sendWelcomeEmail(email, password);
-    // if (!sentemail) {
-    //   throw new ApiError(500, "sending email error");
-    // }
-
     return res
       .status(201)
       .json(new ApiResponse(200, createdUser, "User registered Successfully"));
@@ -142,32 +134,30 @@ const registerUser = asyncHandler(async (req, res, next) => {
     return next(error);
   }
 });
-
-
-
 const logoutUser = asyncHandler(async (req, res) => {
-  await User.findByIdAndUpdate(
-    req.user._id,
-    {
-      $unset: {
-        refreshToken: 1, // this removes the field from document
-      },
-    },
-    {
-      new: true,
-    }
-  );
+  // Agar aap server side par koi token ya session data store karte hain, to usay bhi remove karen
+  // Example:
+  // await User.findByIdAndUpdate(
+  //   req.user._id,
+  //   {
+  //     $unset: { refreshToken: 1 } // Agar applicable ho to
+  //   },
+  //   { new: true }
+  // );
 
+  // Cookies ko clear karne ke liye options set karen
   const options = {
     httpOnly: true,
-    secure: false,
+    secure: true, // Ye true tab set karen jab aap HTTPS use kar rahe hain
+    sameSite: 'None', // SameSite option ko match karen jo login ke dauran use hua tha
+    path: '/', // Path ko match karen jo login ke dauran use hua tha
   };
 
   return res
     .status(200)
-    .clearCookie("accessToken", options)
-    .clearCookie("refreshToken", options)
-    .json(new ApiResponse(200, {}, "User logged Out"));
+    .clearCookie("accessToken", options) // accessToken cookie ko clear karen
+    .clearCookie("refreshToken", { ...options, maxAge: 0 }) // refreshToken cookie ko clear karen, maxAge ko 0 set karen
+    .json(new ApiResponse(200, {}, "User successfully logged out")); // Response bhejen
 });
 
 const forgetPassword = asyncHandler(async (req, res, next) => {
@@ -191,7 +181,6 @@ const forgetPassword = asyncHandler(async (req, res, next) => {
     user.resetTokenExpiry = Date.now() + 2 * 60 * 60 * 1000;
     await user.save();
     await sendPasswordResetEmail(user.email, resetToken);
-
     return res
       .status(200)
       .json(
@@ -205,7 +194,6 @@ const forgetPassword = asyncHandler(async (req, res, next) => {
     return next(error);
   }
 });
-
 const forgetPasswordToken = asyncHandler(async (req, res, next) => {
   const { token } = req.params;
   try {
@@ -222,9 +210,11 @@ const forgetPasswordToken = asyncHandler(async (req, res, next) => {
     return next(error);
   }
 });
-
 const resetPasswordForForget = asyncHandler(async (req, res) => {
   const { password, confirmPassword } = req.body;
+  console.log("pass" ,password);
+  console.log("pass" ,confirmPassword);
+  
   const { token } = req.query;
 
   if (
@@ -261,6 +251,37 @@ const resetPasswordForForget = asyncHandler(async (req, res) => {
     throw error;
   }
 });
+const updateAccountDetails = asyncHandler(async (req, res, next) => {
+  try {
+    const { fullName, email, mobileNo } = req.body;
+
+    // Check if all fields are empty
+    if (![fullName, mobileNo, ].some(field => field !== undefined && field.trim() !== '')) {
+      throw new ApiError(400, "At least one field is required for update");
+    }
+    const user = await User.findByIdAndUpdate(
+      req.user?._id,
+      {
+        $set: {
+          fullName,
+          email,
+          mobileNo,
+        },
+      },
+      { new: true }
+    )
+    if (!user) {
+      throw new ApiError(404, "User not found");
+    }
+
+    return res
+      .status(200)
+      .json(new ApiResponse(200, user, "Account details updated successfully"));
+  } catch (error) {
+    // Pass the error to the next middleware (errorHandler)
+    return next(error);
+  }
+});
 // Refresh token endpoint
 const refreshToken = asyncHandler(async (req, res) => {
   const { refreshToken } = req.cookies;
@@ -294,4 +315,5 @@ export {
   forgetPassword,
   forgetPasswordToken,
   resetPasswordForForget,
+  updateAccountDetails
 };
