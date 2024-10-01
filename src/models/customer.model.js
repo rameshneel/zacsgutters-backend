@@ -84,7 +84,7 @@ const customerSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ["PayPal"],
+      enum: ["PayPal","Cash"],
       required: true,
     },
     paymentStatus: {
@@ -94,18 +94,16 @@ const customerSchema = new mongoose.Schema(
     },
     paypalOrderId: {
       type: String,
-      // required: true,  // Set to true if you always need to track PayPal transactions
-      unique: true     // Ensures that each PayPal order ID is unique
-    },
+    // Sparse index, will ignore documents where the value is null
+    },   
     captureId: {
       type: String,
-      required: false,  // Set to true if capture ID is mandatory for all transactions
-      unique: false     // Optional: Ensure uniqueness if needed
+      required: false,  // Set to true if capture ID is mandatory for all transactions     // Optional: Ensure uniqueness if needed
     },
     refundId: {
       type: String,
       required: false,  // Optional: Set to true if refund ID is mandatory
-      unique: false     // Optional: Ensures uniqueness if needed
+          // Optional: Ensures uniqueness if needed
     },
     refundStatus: {
       type: String,
@@ -124,6 +122,10 @@ const customerSchema = new mongoose.Schema(
     refundDate: {
       type: Date,
       required: false,  // Optional: Track the date when the refund was processed
+    },
+    bookedBy: {
+      type: String,
+      enum: ["admin", "customer"],
     },
     isLocked: { type: Boolean, default: false },
     lockExpiresAt: { type: Date },

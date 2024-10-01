@@ -32,22 +32,29 @@ app.use(
   })
 );
 
+app.set("view engine", "ejs");
+app.set("views", path.join(__dirname, "views"));
 app.use("/public", express.static(path.join(__dirname, "..", "public")));
 app.use(express.json({ limit: "16kb" }));
 app.use(express.urlencoded({ extended: true, limit: "16kb" }));
 app.use(cookieParser());
+app.get("/", (req, res) => {
+  res.render("bookingForm");
+});
+
+
 
 //routes import
 import userRouter from "./routes/user.routes.js";
 import customerRoutes from "./routes/customer.routes.js";
 import paymentRoute from "./routes/payment.route.js";
-import authRoutes from "./routes/auth.routes.js";
+import authRoutes  from "./routes/auth.routes.js"
 
 //routes declaration
 app.use("/api/users", userRouter);
 app.use("/api/customers", customerRoutes);
 app.use("/", paymentRoute);
-app.use("/api", authRoutes);
+app.use('/api', authRoutes);
 
 function errorHandler(err, req, res, next) {
   if (err instanceof ApiError) {

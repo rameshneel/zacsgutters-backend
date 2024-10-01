@@ -6,44 +6,61 @@ function client() {
 }
 
 function environment() {
-  let clientId = process.env.PAYPAL_CLIENT_ID;
-  let clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+  const clientId = process.env.PAYPAL_CLIENT_ID;
+  const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
 
-  return new checkoutNodeJssdk.core.SandboxEnvironment(clientId, clientSecret);
+  if (!clientId || !clientSecret) {
+    throw new Error("Missing PayPal live client credentials in environment variables");
+  }
+
+  console.log("Using PayPal Live credentials");
+  console.log("Client ID:", clientId.substring(0, 5) + "..." + clientId.substring(clientId.length - 5));
+  console.log("Client Secret:", clientSecret.substring(0, 5) + "..." + clientSecret.substring(clientSecret.length - 5));
+
+  return new checkoutNodeJssdk.core.LiveEnvironment(clientId, clientSecret);
 }
+
 export async function createOrder(amount, bookingDetails) {
-  const request = new checkoutNodeJssdk.orders.OrdersCreateRequest();
-  request.prefer("return=representation");
-  request.requestBody({
-    intent: "CAPTURE",
-    purchase_units: [
-      {
-        amount: {
-          currency_code: "USD",
-          value: amount.toString(),
+  try {
+    const request = new checkoutNodeJssdk.orders.OrdersCreateRequest();
+    request.prefer("return=representation");
+    request.requestBody({
+      intent: "CAPTURE",
+      purchase_units: [
+        {
+          amount: {
+            currency_code: "USD",
+            value: amount.toString(),
+          },
+          description: `Service: ${bookingDetails.selectService}, Date: ${bookingDetails.selectedDate}, Time: ${bookingDetails.selectedTimeSlot}`,
         },
-        description: `Service: ${bookingDetails.selectService}, Date: ${bookingDetails.selectedDate}, Time: ${bookingDetails.selectedTimeSlot}`,
+      ],
+      application_context: {
+        return_url: "https://yourdomain.com/paypal/return", // Update with your live domain
+        cancel_url: "https://yourdomain.com/booking-cancelled", // Update with your live domain
       },
-    ],
-    // Gutter Repairs Options: ${bookingDetails.gutterRepairsOptions}, gutterCleaningOptions:${bookingDetails.gutterCleaningOptions},
+    });
 
-    application_context: {
-      return_url: "http://localhost:5173/paypal/return", // Specify your return_url here
-      cancel_url: "http://localhost:5173/booking-cancelled", // Specify your cancel_url here
-    },
-  });
-
-  const order = await client().execute(request);
-  console.log("order for ********************", order);
-
-  return order.result;
+    const order = await client().execute(request);
+    console.log("Order created:", order.result.id);
+    return order.result;
+  } catch (error) {
+    console.error("Error creating order:", error);
+    throw error;
+  }
 }
+
 export async function capturePayment(orderId) {
-  const request = new checkoutNodeJssdk.orders.OrdersCaptureRequest(orderId);
-  request.requestBody({});
-  const response = await client().execute(request);
-  console.log("responce nn", response);
-  return response.result;
+  try {
+    const request = new checkoutNodeJssdk.orders.OrdersCaptureRequest(orderId);
+    request.requestBody({});
+    const response = await client().execute(request);
+    console.log("Payment captured for order:", orderId);
+    return response.result;
+  } catch (error) {
+    console.error("Error capturing payment:", error);
+    throw error;
+  }
 }
 export async function checkOrderStatus(orderId) {
   const request = new checkoutNodeJssdk.orders.OrdersGetRequest(orderId);
